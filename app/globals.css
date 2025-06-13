@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+/* === Base Colors and Theme Variables === */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -57,13 +58,61 @@
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* === PRINT STYLE (58mm Thermal) === */
+@media print {
+  body {
+    background: white !important;
+    margin: 0;
+    padding: 0;
+    width: 58mm;
+    font-family: monospace;
+    color: #000;
+  }
+
+  @page {
+    size: 58mm auto;
+    margin: 0;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print\:text-xs {
+    font-size: 10px !important;
+  }
+
+  .print\:text-sm {
+    font-size: 12px !important;
+  }
+
+  .print\:text-base {
+    font-size: 14px !important;
+  }
+
+  .print\:w-\[58mm\] {
+    width: 58mm !important;
+  }
+
+  .print\:p-0 {
+    padding: 0 !important;
+  }
+
+  .print\:font-mono {
+    font-family: monospace !important;
   }
 }
