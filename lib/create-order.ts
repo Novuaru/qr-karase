@@ -3,7 +3,7 @@ import { createClient } from "@/utils/supabase/server";
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
-  const supabase = createClient();
+  const supabase = await createClient(); // ✅ Fix here
   const body = await req.json();
 
   const { items } = body;
@@ -15,7 +15,9 @@ export async function POST(req: Request) {
     .select()
     .single();
 
-  if (orderError) return NextResponse.json({ error: orderError.message }, { status: 500 });
+  if (orderError) {
+    return NextResponse.json({ error: orderError.message }, { status: 500 });
+  }
 
   const orderItems = items.map((item: any) => ({
     order_id: order.id,
@@ -27,7 +29,9 @@ export async function POST(req: Request) {
 
   const { error: itemsError } = await supabase.from("order_items").insert(orderItems);
 
-  if (itemsError) return NextResponse.json({ error: itemsError.message }, { status: 500 });
+  if (itemsError) {
+    return NextResponse.json({ error: itemsError.message }, { status: 500 });
+  }
 
   return NextResponse.json({ order_id: order.id });
 }
