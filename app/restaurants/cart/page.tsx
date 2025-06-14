@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { ShoppingCartIcon, TrashIcon, PlusIcon, MinusIcon } from "@heroicons/react/24/solid";
 
+export const dynamic = "force-dynamic";
+
 type CartItem = {
   id: string;
   name: string;
