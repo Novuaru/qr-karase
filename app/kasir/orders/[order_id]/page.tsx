@@ -1,192 +1,194 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { createClient } from '@/utils/supabase/client';
-import { Loader2 } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { createClient } from "@/utils/supabase/client";
+import { Loader2 } from "lucide-react";
 
 export default function OrderReceiptPage() {
   const { order_id } = useParams();
   const router = useRouter();
   const supabase = createClient();
 
+  const [order, setOrder] = useState<any>(null);
   const [orderItems, setOrderItems] = useState<any[]>([]);
-  const [tableNumber, setTableNumber] = useState<string | null>(null);
-  const [restaurantName, setRestaurantName] = useState<string | null>(null);
-  const [kasirName, setKasirName] = useState<string | null>(null);
-  const [kasirId, setKasirId] = useState<string | null>(null);
-  const [shiftId, setShiftId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [printing, setPrinting] = useState(false);
-  const hasPrintedRef = useRef(false);
-  const [timestamp, setTimestamp] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [completed, setCompleted] = useState(false);
+  const [shiftId, setShiftId] = useState<string | null>(null);
+  const [totalPrice, setTotalPrice] = useState(0);
+  const [kasirName, setKasirName] = useState<string>("");
+
+  const kasir_id = typeof window !== "undefined" ? localStorage.getItem("id_kasir") : null;
 
   useEffect(() => {
-    const now = new Date();
-    setTimestamp(
-      now.toLocaleString('id-ID', {
-        dateStyle: 'short',
-        timeStyle: 'medium',
-      })
-    );
+    if (!order_id || !kasir_id) return;
 
-    setKasirId(localStorage.getItem('id_kasir'));
-    setShiftId(localStorage.getItem('shift_id'));
-    setKasirName(localStorage.getItem('kasir_nama') || 'Kasir');
-  }, []);
-
-  useEffect(() => {
-    const fetchOrder = async () => {
-      if (!order_id || !kasirId || !shiftId) return;
-
+    const fetchData = async () => {
       setLoading(true);
 
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders')
-        .select(`
-          id,
-          table_number,
-          status,
-          restaurant_id,
-          order_items (
-            id,
-            quantity,
-            menu_items (
-              name,
-              price
-            )
-          )
-        `)
-        .eq('id', order_id)
+      const { data: orderData } = await supabase
+        .from("orders")
+        .select("*, order_items(*, menu_items(name, price)), restaurants(name, location)")
+        .eq("id", order_id)
         .single();
 
-      if (orderError || !orderData) {
-        alert('Gagal mengambil data pesanan.');
-        router.push('/kasir/dashboard');
+      if (!orderData) {
+        setLoading(false);
         return;
       }
 
-      const { data: resto, error: restoError } = await supabase
-        .from('restaurants')
-        .select('name')
-        .eq('id', orderData.restaurant_id)
+      setOrder(orderData);
+      setOrderItems(orderData.order_items || []);
+
+      const total = orderData.order_items.reduce((sum: number, item: any) => {
+        return sum + item.menu_items.price * item.quantity;
+      }, 0);
+      setTotalPrice(total);
+
+      const { data: shiftData } = await supabase
+        .from("shifts")
+        .select("*")
+        .eq("kasir_id", kasir_id)
+        .is("end_time", null)
+        .order("start_time", { ascending: false })
+        .limit(1)
         .single();
 
-      if (restoError) {
-        alert('Gagal mengambil nama restoran.');
-        router.push('/kasir/dashboard');
-        return;
-      }
+      if (shiftData) setShiftId(shiftData.id);
 
-      setTableNumber(orderData.table_number);
-      setOrderItems(orderData.order_items);
-      setRestaurantName(resto?.name || 'Restoran');
+      const { data: kasirData } = await supabase
+        .from("users")
+        .select("name")
+        .eq("id", kasir_id)
+        .single();
+
+      if (kasirData) setKasirName(kasirData.name);
+
       setLoading(false);
     };
 
-    fetchOrder();
-  }, [order_id, kasirId, shiftId]);
+    fetchData();
+  }, [order_id, kasir_id]);
 
-  const handlePrint = async () => {
-    if (hasPrintedRef.current || !order_id || !kasirId || !shiftId) return;
+  const handleConfirm = async () => {
+    if (!order_id || !kasir_id || !shiftId || totalPrice <= 0) return;
 
-    hasPrintedRef.current = true;
-    setPrinting(true);
+    setSaving(true);
 
-    for (const item of orderItems) {
-      const { quantity, menu_items } = item;
-      const price = menu_items?.price || 0;
+    const { error: insertError } = await supabase.from("sales_logs").insert([{
+      order_id,
+      kasir_id,
+      shift_id: shiftId,
+      total_price: totalPrice,
+    }]);
 
-      await supabase.from('sales_logs').insert({
-        id: uuidv4(),
-        kasir_id: kasirId,
-        shift_id: shiftId,
-        order_id: order_id,
-        menu_name: menu_items?.name || 'Item',
-        quantity,
-        total_price: quantity * price,
-      });
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({ status: "completed" })
+      .eq("id", order_id);
+
+    if (insertError || updateError) {
+      console.error("Gagal menyimpan atau mencetak:", insertError || updateError);
+      setSaving(false);
+      return;
     }
 
-    await supabase
-      .from('orders')
-      .update({ status: 'completed' })
-      .eq('id', order_id);
-
+    setCompleted(true);
+    setSaving(false);
     window.print();
-    router.push('/kasir/dashboard');
   };
-
-  const total = orderItems.reduce((sum, item) => {
-    return sum + item.quantity * (item.menu_items?.price || 0);
-  }, 0);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="animate-spin w-6 h-6 mr-2" />
-        Memuat data pesanan...
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <Loader2 className="w-10 h-10 animate-spin text-red-600" />
       </div>
     );
   }
 
+  if (!order) {
+    return <div className="text-center text-red-500 mt-20">Pesanan tidak ditemukan.</div>;
+  }
+
   return (
-    <main className="max-w-sm mx-auto p-4 print:w-[58mm] print:max-w-none print:p-0 print:font-mono">
-      {/* Header Struk */}
-      <div className="text-center mb-2 print:text-sm">
-        <h2 className="font-bold text-lg print:text-base">{restaurantName}</h2>
-        <p className="text-xs">Meja: {tableNumber}</p>
-        <p className="text-xs">Waktu: {timestamp}</p>
-        <p className="text-xs">Kasir: {kasirName}</p>
+    <div className="max-w-sm mx-auto p-4 print:p-0 font-mono text-xs text-black">
+      {/* === STRUK === */}
+      <div
+        id="receipt"
+        className="bg-white p-4 shadow rounded border print:border-none print:shadow-none print:p-1 print:rounded-none print:w-[72mm]"
+      >
+        <div className="text-center mb-2">
+          <h2 className="text-base font-bold uppercase tracking-wide text-red-700">
+            {order.restaurants?.name || "Nama Restoran"}
+          </h2>
+          <p className="text-[10px]">{order.restaurants?.location || "-"}</p>
+          <div className="my-1 border-t border-dashed border-gray-400" />
+        </div>
+
+        <div className="mb-2">
+          <p>ID: <span className="float-right">{order.id}</span></p>
+          <p>Kasir: <span className="float-right">{kasirName}</span></p>
+          <p>Tanggal: <span className="float-right">{new Date(order.created_at).toLocaleString()}</span></p>
+        </div>
+
+        <div className="my-1 border-t border-dashed border-gray-400" />
+
+        <div className="mb-2">
+          {orderItems.map((item, i) => (
+            <div key={i} className="flex justify-between">
+              <div className="w-1/2 truncate">{item.menu_items.name}</div>
+              <div className="text-center w-1/6">x{item.quantity}</div>
+              <div className="text-right w-1/3">Rp {(item.menu_items.price * item.quantity).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="my-1 border-t border-dashed border-gray-400" />
+
+        <div className="flex justify-between font-bold text-red-700 mt-2">
+          <span>Total</span>
+          <span>Rp {totalPrice.toLocaleString()}</span>
+        </div>
+
+        <div className="my-1 border-t border-dashed border-gray-400" />
+
+        <div className="text-center mt-2">
+          <p>Terima kasih!</p>
+          <p>~ Sampai Jumpa Kembali ~</p>
+        </div>
       </div>
 
-      <div className="border-t border-dashed my-2" />
-
-      {/* Daftar Item */}
-      <div className="text-sm print:text-xs">
-        {orderItems.map((item, idx) => (
-          <div key={idx} className="flex justify-between mb-1">
-            <span>{item.quantity} x {item.menu_items?.name}</span>
-            <span>
-              Rp {(item.quantity * item.menu_items?.price).toLocaleString('id-ID')}
+      {/* === TOMBOL AKSI === */}
+      <div className="flex gap-2 mt-4 print:hidden justify-between">
+        <button
+          onClick={() => router.push("/kasir/dashboard")}
+          className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
+        >
+          ← Kembali
+        </button>
+        <button
+          onClick={handleConfirm}
+          disabled={saving || completed}
+          className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 disabled:opacity-60"
+        >
+          {saving ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="animate-spin w-4 h-4" />
+              Menyimpan...
             </span>
-          </div>
-        ))}
-      </div>
-
-      <div className="border-t border-dashed my-2" />
-
-      {/* Total */}
-      <div className="flex justify-between font-bold text-base print:text-sm">
-        <span>Total</span>
-        <span>Rp {total.toLocaleString('id-ID')}</span>
-      </div>
-
-      <div className="border-t border-dashed my-2" />
-
-      {/* Ucapan Terima Kasih */}
-      <div className="text-center text-xs mt-4">
-        <p>Terima kasih 🙏</p>
-        <p>Struk ini adalah bukti transaksi sah</p>
-      </div>
-
-      {/* Tombol (disembunyikan saat cetak) */}
-      <div className="mt-6 print:hidden">
-        <button
-          onClick={handlePrint}
-          disabled={printing}
-          className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
-        >
-          {printing ? 'Mencetak...' : 'Cetak Struk'}
-        </button>
-        <button
-          onClick={() => router.push('/kasir/dashboard')}
-          className="w-full mt-2 text-sm text-center text-blue-600 hover:underline"
-        >
-          ← Kembali ke Dashboard
+          ) : (
+            "Simpan & Cetak"
+          )}
         </button>
       </div>
-    </main>
+
+      {/* === NOTIFIKASI STATUS === */}
+      {completed && (
+        <div className="mt-3 text-green-700 text-center print:hidden">
+          ✅ Pesanan berhasil disimpan dan dicetak.
+        </div>
+      )}
+    </div>
   );
 }
