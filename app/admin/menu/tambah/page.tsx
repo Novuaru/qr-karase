@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import toast, { Toaster } from 'react-hot-toast'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function TambahMenuPage() {
@@ -17,9 +16,15 @@ export default function TambahMenuPage() {
     name: '',
     categorySelect: '',
     categoryNew: '',
-    // Removed size_option, price_r, price_l
+    size_option: '',
+    price_r: '',
+    price_l: '',
     price: '',
     is_available: true,
+    is_promo: false,
+    promo_price: '',
+    promo_description: '',
+    is_best_seller: false, // ✅ Tambahan
   })
 
   const [image, setImage] = useState<File | null>(null)
@@ -69,14 +74,19 @@ export default function TambahMenuPage() {
     e.preventDefault()
 
     if (!selectedRestaurantId) {
-      toast.error('Pilih restoran terlebih dahulu.')
+      alert('Pilih restoran terlebih dahulu')
       return
     }
 
     const finalCategory = form.categoryNew.trim() || form.categorySelect.trim()
 
     if (!form.name.trim() || !finalCategory) {
-      toast.error('Nama dan kategori menu harus diisi.')
+      alert('Nama dan kategori menu harus diisi')
+      return
+    }
+
+    if (form.is_promo && !form.promo_price.trim()) {
+      alert('Harga promo harus diisi jika menu dalam promo')
       return
     }
 
@@ -93,13 +103,13 @@ export default function TambahMenuPage() {
 
         const fileName = `menu/${Date.now()}-${cleanedFileName}`
 
-        const { data: storageData, error: uploadError } = await supabase.storage
+        const { error: uploadError } = await supabase.storage
           .from('menu-images')
           .upload(fileName, image, { upsert: true })
 
         if (uploadError) {
           console.error('Upload error:', uploadError)
-          toast.error('Gagal unggah gambar: ' + uploadError.message)
+          alert('Gagal upload gambar: ' + uploadError.message)
           setLoading(false)
           return
         }
@@ -115,22 +125,28 @@ export default function TambahMenuPage() {
         restaurant_id: selectedRestaurantId,
         name: form.name,
         category: finalCategory,
-        // Removed size_option, price_r, price_l from insertion
+        size_option: form.size_option || null,
+        price_r: form.price_r ? parseInt(form.price_r) : null,
+        price_l: form.price_l ? parseInt(form.price_l) : null,
         price: form.price ? parseInt(form.price) : null,
         is_available: form.is_available,
         image_url,
+        is_promo: form.is_promo,
+        promo_price: form.promo_price ? parseInt(form.promo_price) : null,
+        promo_description: form.promo_description || null,
+        is_best_seller: form.is_best_seller, // ✅ Tambahan
       })
 
       if (error) {
-        toast.error('Gagal menambahkan menu: ' + error.message)
+        alert('Gagal menambahkan menu: ' + error.message)
         console.error(error)
       } else {
-        toast.success('Menu berhasil ditambahkan!')
+        alert('Menu berhasil ditambahkan')
         router.push('/admin/menu')
       }
     } catch (err) {
       console.error('Error saat submit:', err)
-      toast.error('Terjadi kesalahan saat menambahkan menu.')
+      alert('Terjadi kesalahan saat menambahkan menu')
     } finally {
       setLoading(false)
     }
@@ -138,13 +154,12 @@ export default function TambahMenuPage() {
 
   return (
     <div className="p-6 max-w-xl mx-auto">
-      <Toaster position="top-center" reverseOrder={false} />
       <h1 className="text-2xl font-semibold mb-6 text-red-600">Tambah Menu</h1>
       <form onSubmit={handleSubmit} className="space-y-5">
         <select
           value={selectedRestaurantId}
           onChange={(e) => setSelectedRestaurantId(e.target.value)}
-          className="w-full border border-red-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:bg-gray-100 disabled:cursor-not-allowed"
+          className="w-full border border-red-300 rounded-md p-3"
           required
           disabled={loading}
         >
@@ -159,7 +174,7 @@ export default function TambahMenuPage() {
         <input
           type="text"
           placeholder="Nama menu"
-          className="w-full border border-red-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:bg-gray-100 disabled:cursor-not-allowed"
+          className="w-full border border-red-300 rounded-md p-3"
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
           required
@@ -169,7 +184,7 @@ export default function TambahMenuPage() {
         <select
           value={form.categorySelect}
           onChange={(e) => setForm({ ...form, categorySelect: e.target.value, categoryNew: '' })}
-          className="w-full border border-red-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:bg-gray-100 disabled:cursor-not-allowed"
+          className="w-full border border-red-300 rounded-md p-3"
           disabled={loading || !selectedRestaurantId}
         >
           <option value="">Pilih Kategori (atau ketik di bawah)</option>
@@ -183,17 +198,44 @@ export default function TambahMenuPage() {
         <input
           type="text"
           placeholder="Atau ketik kategori baru"
-          className="w-full border border-red-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:bg-gray-100 disabled:cursor-not-allowed"
+          className="w-full border border-red-300 rounded-md p-3"
           value={form.categoryNew}
           onChange={(e) => setForm({ ...form, categoryNew: e.target.value, categorySelect: '' })}
           disabled={loading || !selectedRestaurantId}
         />
 
-        {/* Removed Ukuran, Harga R, and Harga L input fields */}
+        <input
+          type="text"
+          placeholder="Ukuran (opsional)"
+          className="w-full border border-red-300 rounded-md p-3"
+          value={form.size_option}
+          onChange={(e) => setForm({ ...form, size_option: e.target.value })}
+          disabled={loading}
+        />
+
+        <div className="grid grid-cols-2 gap-4">
+          <input
+            type="number"
+            placeholder="Harga R (opsional)"
+            className="border border-red-300 rounded-md p-3"
+            value={form.price_r}
+            onChange={(e) => setForm({ ...form, price_r: e.target.value })}
+            disabled={loading}
+          />
+          <input
+            type="number"
+            placeholder="Harga L (opsional)"
+            className="border border-red-300 rounded-md p-3"
+            value={form.price_l}
+            onChange={(e) => setForm({ ...form, price_l: e.target.value })}
+            disabled={loading}
+          />
+        </div>
+
         <input
           type="number"
           placeholder="Harga (opsional)"
-          className="w-full border border-red-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:bg-gray-100 disabled:cursor-not-allowed"
+          className="w-full border border-red-300 rounded-md p-3"
           value={form.price}
           onChange={(e) => setForm({ ...form, price: e.target.value })}
           disabled={loading}
@@ -217,6 +259,49 @@ export default function TambahMenuPage() {
           />
           <span className="text-red-600 font-medium">Tersedia</span>
         </label>
+
+        <label className="flex items-center space-x-3">
+          <input
+            type="checkbox"
+            checked={form.is_promo}
+            onChange={(e) => setForm({ ...form, is_promo: e.target.checked })}
+            disabled={loading}
+            className="w-5 h-5 accent-red-400"
+          />
+          <span className="text-red-600 font-medium">Promo</span>
+        </label>
+
+        <label className="flex items-center space-x-3">
+          <input
+            type="checkbox"
+            checked={form.is_best_seller}
+            onChange={(e) => setForm({ ...form, is_best_seller: e.target.checked })}
+            disabled={loading}
+            className="w-5 h-5 accent-red-400"
+          />
+          <span className="text-red-600 font-medium">Best Seller</span>
+        </label>
+
+        {form.is_promo && (
+          <div className="space-y-4">
+            <input
+              type="number"
+              placeholder="Harga Promo"
+              className="w-full border border-red-300 rounded-md p-3"
+              value={form.promo_price}
+              onChange={(e) => setForm({ ...form, promo_price: e.target.value })}
+              disabled={loading}
+              required
+            />
+            <textarea
+              placeholder="Deskripsi Promo"
+              className="w-full border border-red-300 rounded-md p-3"
+              value={form.promo_description}
+              onChange={(e) => setForm({ ...form, promo_description: e.target.value })}
+              disabled={loading}
+            />
+          </div>
+        )}
 
         <button
           type="submit"
