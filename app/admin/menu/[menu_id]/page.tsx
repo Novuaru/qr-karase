@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import toast, { Toaster } from 'react-hot-toast'
 import { supabase } from '@/lib/supabase'
 import { Loader2, Trash2 } from 'lucide-react'
 
@@ -13,6 +12,10 @@ type MenuItem = {
   category?: string
   is_available: boolean
   image_url?: string
+  is_best_seller?: boolean
+  is_promo?: boolean
+  promo_price?: number | null
+  promo_description?: string | null
 }
 
 export default function EditMenuPage() {
@@ -52,10 +55,7 @@ export default function EditMenuPage() {
         .from('menu_items')
         .select('category')
 
-      if (error) {
-        console.error('Gagal mengambil kategori:', error)
-        return
-      }
+      if (error) return
 
       const unique = Array.from(
         new Set(data.map((item) => item.category).filter(Boolean))
@@ -75,20 +75,20 @@ export default function EditMenuPage() {
     const price = parseFloat(String(values.price))
 
     if (isNaN(price)) {
-      toast.error('Harga tidak valid.')
+      alert('Harga tidak valid.')
       setSaving(false)
       return
     }
 
     if (imageFile) {
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(imageFile.type)) {
-        toast.error('Format gambar harus JPG, PNG, atau WEBP.')
+        alert('Format gambar harus JPG, PNG, atau WEBP.')
         setSaving(false)
         return
       }
 
       if (imageFile.size > 2 * 1024 * 1024) {
-        toast.error('Ukuran gambar maksimal 2MB.')
+        alert('Ukuran gambar maksimal 2MB.')
         setSaving(false)
         return
       }
@@ -102,7 +102,7 @@ export default function EditMenuPage() {
         })
 
       if (uploadError) {
-        toast.error('Gagal mengunggah gambar.')
+        alert('Gagal mengunggah gambar.')
         setSaving(false)
         return
       }
@@ -122,71 +122,42 @@ export default function EditMenuPage() {
         category: values.category || '',
         is_available: values.is_available,
         image_url: imageUrl,
+        is_best_seller: values.is_best_seller || false,
+        is_promo: values.is_promo || false,
+        promo_price: values.is_promo ? values.promo_price : null,
+        promo_description: values.is_promo ? values.promo_description : null,
       })
       .eq('id', menu_id)
 
     setSaving(false)
 
     if (error) {
-      toast.error('Gagal menyimpan perubahan.')
+      alert('Gagal menyimpan perubahan.')
     } else {
-      toast.success('Menu berhasil diperbarui.')
-      setTimeout(() => {
-        router.push('/admin/menu')
-      }, 1500) // Jeda 1.5 detik sebelum pindah halaman
+      alert('Menu berhasil diperbarui.')
+      router.push('/admin/menu')
     }
   }
 
   const handleDelete = async () => {
     if (!menu_id) return
+    if (!confirm('Yakin ingin menghapus menu ini?')) return
 
-    toast(
-      (t) => (
-        <div className="flex flex-col items-center p-1">
-          <p className="mb-3 text-sm font-medium text-gray-800">
-            Yakin ingin menghapus menu ini?
-          </p>
-          <div className="flex gap-2">
-            <button
-              className="px-4 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 text-xs font-semibold shadow-md transition-all duration-150 ease-in-out"
-              onClick={async () => {
-                toast.dismiss(t.id)
-                setDeleting(true)
-                const { error: deleteError } = await supabase
-                  .from('menu_items')
-                  .delete()
-                  .eq('id', menu_id)
-                setDeleting(false)
-                if (deleteError) {
-                  toast.error(
-                    'Gagal menghapus menu. Pastikan tidak ada relasi dengan data pesanan.',
-                    { duration: 4000 }
-                  )
-                } else {
-                  toast.success('Menu berhasil dihapus.', { duration: 3000 })
-                  setTimeout(() => {
-                    router.push('/admin/menu')
-                  }, 2500) // Jeda 2.5 detik, sedikit sebelum toast hilang
-                }
-              }}
-            >
-              Ya, Hapus
-            </button>
-            <button
-              className="px-4 py-1.5 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-xs font-semibold shadow-md transition-all duration-150 ease-in-out"
-              onClick={() => toast.dismiss(t.id)}
-            >
-              Batal
-            </button>
-          </div>
-        </div>
-      ),
-      {
-        duration: Infinity, // Biarkan toast terbuka sampai pengguna berinteraksi
-        position: 'top-center',
-      }
-    )
+    setDeleting(true)
+    const { error } = await supabase
+      .from('menu_items')
+      .delete()
+      .eq('id', menu_id)
+    setDeleting(false)
+
+    if (error) {
+      alert('Gagal menghapus menu. Pastikan tidak ada relasi dengan data pesanan.')
+    } else {
+      alert('Menu berhasil dihapus.')
+      router.push('/admin/menu')
+    }
   }
+
   if (loading)
     return (
       <div className="flex justify-center items-center h-screen">
@@ -201,7 +172,6 @@ export default function EditMenuPage() {
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
-      <Toaster position="top-center" reverseOrder={false} />
       <h1 className="text-3xl font-bold text-gray-900 mb-8">Edit Menu</h1>
 
       {menu && (
@@ -248,12 +218,22 @@ function FormEditMenu({
   }, [initialValues])
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
-    const { name, value } = e.target
+    const { name, value, type } = e.target
+    let newValue: any
+
+    if (type === 'checkbox') {
+      newValue = (e.target as HTMLInputElement).checked
+    } else if (name === 'price' || name === 'promo_price') {
+      newValue = parseFloat(value)
+    } else {
+      newValue = value
+    }
+
     setForm((prev) => ({
       ...prev,
-      [name]: name === 'is_available' ? value === 'true' : value,
+      [name]: newValue,
     }))
   }
 
@@ -266,7 +246,7 @@ function FormEditMenu({
     e.preventDefault()
 
     if (!form.name || !form.price) {
-      toast.error('Nama dan harga wajib diisi.')
+      alert('Nama dan harga wajib diisi.')
       return
     }
 
@@ -283,7 +263,7 @@ function FormEditMenu({
           value={form.name}
           onChange={handleChange}
           required
-          className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:ring-red-500 focus:border-red-500"
+          className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm"
         />
       </div>
 
@@ -296,7 +276,7 @@ function FormEditMenu({
           onChange={handleChange}
           required
           min={0}
-          className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:ring-red-500 focus:border-red-500"
+          className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm"
         />
       </div>
 
@@ -306,7 +286,7 @@ function FormEditMenu({
           name="category"
           value={form.category || ''}
           onChange={handleChange}
-          className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:ring-red-500 focus:border-red-500"
+          className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm"
         >
           <option value="">-- Pilih Kategori --</option>
           {categories.map((cat) => (
@@ -314,29 +294,69 @@ function FormEditMenu({
               {cat}
             </option>
           ))}
-          <option value="__new">+ Tambah Kategori Baru</option>
         </select>
-
-        {form.category === '__new' && (
-          <input
-            type="text"
-            name="category"
-            placeholder="Kategori baru"
-            onChange={(e) =>
-              setForm((prev) => ({ ...prev, category: e.target.value }))
-            }
-            className="mt-2 block w-full rounded-md border border-gray-300 shadow-sm"
-          />
-        )}
       </div>
+
+      <div className="flex items-center">
+        <input
+          type="checkbox"
+          name="is_best_seller"
+          checked={form.is_best_seller || false}
+          onChange={handleChange}
+          className="mr-2"
+        />
+        <label className="text-sm font-medium text-gray-700">Best Seller</label>
+      </div>
+
+      <div className="flex items-center">
+        <input
+          type="checkbox"
+          name="is_promo"
+          checked={form.is_promo || false}
+          onChange={handleChange}
+          className="mr-2"
+        />
+        <label className="text-sm font-medium text-gray-700">Promo Aktif</label>
+      </div>
+
+      {form.is_promo && (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Harga Promo</label>
+            <input
+              type="number"
+              name="promo_price"
+              value={form.promo_price ?? ''}
+              onChange={handleChange}
+              min={0}
+              className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Deskripsi Promo</label>
+            <textarea
+              name="promo_description"
+              value={form.promo_description ?? ''}
+              onChange={handleChange}
+              className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm"
+            />
+          </div>
+        </>
+      )}
 
       <div>
         <label className="block text-sm font-medium text-gray-700">Status Ketersediaan</label>
         <select
           name="is_available"
           value={form.is_available ? 'true' : 'false'}
-          onChange={handleChange}
-          className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm focus:ring-red-500 focus:border-red-500"
+          onChange={(e) =>
+            setForm((prev) => ({
+              ...prev,
+              is_available: e.target.value === 'true',
+            }))
+          }
+          className="mt-1 block w-full rounded-md border border-gray-300 shadow-sm"
         >
           <option value="true">Tersedia</option>
           <option value="false">Tidak Tersedia</option>
@@ -367,7 +387,7 @@ function FormEditMenu({
       <button
         type="submit"
         disabled={loading}
-        className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+        className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
       >
         {loading ? (
           <>
