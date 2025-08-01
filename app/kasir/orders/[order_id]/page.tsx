@@ -1,194 +1,290 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/utils/supabase/client";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { createClient } from '@/utils/supabase/client';
+import { Loader2 } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
 
-export default function OrderReceiptPage() {
+export default function OrderDetailPage() {
   const { order_id } = useParams();
   const router = useRouter();
   const supabase = createClient();
-
-  const [order, setOrder] = useState<any>(null);
+  
   const [orderItems, setOrderItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [completed, setCompleted] = useState(false);
+  const [tableNumber, setTableNumber] = useState<string | null>(null);
+  const [restaurantName, setRestaurantName] = useState<string | null>(null);
+  const [kasirName, setKasirName] = useState<string | null>(null);
+  const [kasirId, setKasirId] = useState<string | null>(null);
   const [shiftId, setShiftId] = useState<string | null>(null);
-  const [totalPrice, setTotalPrice] = useState(0);
-  const [kasirName, setKasirName] = useState<string>("");
+  const [shiftData, setShiftData] = useState<{
+    id: string;
+    kasir_id: string;
+    start_time: string;
+    end_time: string | null;
+  } | null>(null);
+  const [order, setOrder] = useState<any>(null);
 
-  const kasir_id = typeof window !== "undefined" ? localStorage.getItem("id_kasir") : null;
+  const [loading, setLoading] = useState(true);
+  const [printing, setPrinting] = useState(false);
+  const hasPrintedRef = useRef(false);
 
   useEffect(() => {
-    if (!order_id || !kasir_id) return;
+    setKasirId(localStorage.getItem('id_kasir'));
+    setShiftId(localStorage.getItem('shift_id'));
+    setKasirName(localStorage.getItem('kasir_nama') || 'Kasir');
+  }, []);
 
-    const fetchData = async () => {
+  useEffect(() => {
+    const fetchOrder = async () => {
+      if (!order_id || !kasirId || !shiftId) return;
+
       setLoading(true);
 
-      const { data: orderData } = await supabase
-        .from("orders")
-        .select("*, order_items(*, menu_items(name, price)), restaurants(name, location)")
-        .eq("id", order_id)
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .select(`
+          id,
+          table_number,
+          status,
+          restaurant_id,
+          order_items (
+            id,
+            quantity,
+            menu_items (
+              name,
+              price
+            )
+          )
+        `)
+        .eq('id', order_id)
         .single();
 
-      if (!orderData) {
-        setLoading(false);
+      if (orderError || !orderData) {
+        alert('Gagal mengambil detail pesanan.');
+        router.push('/kasir/dashboard');
         return;
       }
 
+      const { data: resto, error: restoError } = await supabase
+        .from('restaurants')
+        .select('name')
+        .eq('id', orderData.restaurant_id)
+        .single();
+
+      if (restoError) {
+        alert('Gagal mengambil nama restoran.');
+        router.push('/kasir/dashboard');
+        return;
+      }
+
+      const { data: shift, error: shiftError } = await supabase
+        .from('shifts')
+        .select('*')
+        .eq('id', shiftId)
+        .eq('kasir_id', kasirId)
+        .single();
+
+      if (shiftError) {
+        console.warn('Gagal mengambil shift:', shiftError.message);
+      }
+
+      setOrderItems(orderData.order_items ?? []);
+      setTableNumber(orderData.table_number);
+      setRestaurantName(resto?.name || null);
+      setShiftData(shift || null);
       setOrder(orderData);
-      setOrderItems(orderData.order_items || []);
-
-      const total = orderData.order_items.reduce((sum: number, item: any) => {
-        return sum + item.menu_items.price * item.quantity;
-      }, 0);
-      setTotalPrice(total);
-
-      const { data: shiftData } = await supabase
-        .from("shifts")
-        .select("*")
-        .eq("kasir_id", kasir_id)
-        .is("end_time", null)
-        .order("start_time", { ascending: false })
-        .limit(1)
-        .single();
-
-      if (shiftData) setShiftId(shiftData.id);
-
-      const { data: kasirData } = await supabase
-        .from("users")
-        .select("name")
-        .eq("id", kasir_id)
-        .single();
-
-      if (kasirData) setKasirName(kasirData.name);
-
       setLoading(false);
     };
 
-    fetchData();
-  }, [order_id, kasir_id]);
+    fetchOrder();
+  }, [order_id, kasirId, shiftId]);
 
-  const handleConfirm = async () => {
-    if (!order_id || !kasir_id || !shiftId || totalPrice <= 0) return;
+  const total = Math.round(
+    orderItems.reduce(
+      (acc, item) => acc + item.quantity * item.menu_items.price,
+      0
+    )
+  );
 
-    setSaving(true);
+  const formatShiftTime = (start: string, end: string | null) => {
+    const startDate = new Date(start);
+    const endDate = end ? new Date(end) : null;
 
-    const { error: insertError } = await supabase.from("sales_logs").insert([{
-      order_id,
-      kasir_id,
-      shift_id: shiftId,
-      total_price: totalPrice,
-    }]);
+    const options: Intl.DateTimeFormatOptions = {
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    };
 
-    const { error: updateError } = await supabase
-      .from("orders")
-      .update({ status: "completed" })
-      .eq("id", order_id);
+    const startStr = startDate.toLocaleString('id-ID', options);
+    const endStr = endDate ? endDate.toLocaleString('id-ID', options) : 'Masih berjalan';
 
-    if (insertError || updateError) {
-      console.error("Gagal menyimpan atau mencetak:", insertError || updateError);
-      setSaving(false);
+    return `${startStr} - ${endStr}`;
+  };
+
+  const handlePrintClick = async () => {
+    if (printing || hasPrintedRef.current) return;
+
+    if (!order_id || !kasirId || !shiftId) {
+      alert('Data tidak lengkap');
       return;
     }
 
-    setCompleted(true);
-    setSaving(false);
-    window.print();
+    setPrinting(true);
+    const salesLogId = uuidv4();
+
+    const { error } = await supabase.from('sales_logs').insert([
+      {
+        id: salesLogId,
+        order_id,
+        kasir_id: kasirId,
+        shift_id: shiftId,
+        total_price: total,
+      },
+    ]);
+
+    if (error) {
+      alert('Gagal menyimpan data penjualan: ' + error.message);
+      setPrinting(false);
+      return;
+    }
+
+    await supabase.from('orders').update({ 
+      status: 'completed', 
+      printed_at: new Date(),
+      is_confirmed: true // <-- tambahkan ini
+    }).eq('id', order_id);
+    hasPrintedRef.current = true;
+
+    const handleAfterPrint = () => {
+      window.removeEventListener('afterprint', handleAfterPrint);
+      router.push('/kasir/dashboard');
+    };
+
+    window.addEventListener('afterprint', handleAfterPrint);  
+
+    setTimeout(() => {
+      window.print();
+    }, 500);
+
+    setPrinting(false);
+  };
+
+  // Contoh fungsi konfirmasi admin
+  const handleConfirmPayment = async (orderId: string) => {
+    const { error } = await supabase
+      .from('orders')
+      .update({ is_paid: true })
+      .eq('id', orderId);
+
+    if (error) {
+      alert('Gagal konfirmasi pembayaran');
+    } else {
+      alert('Pembayaran dikonfirmasi!');
+      // Refresh data atau redirect jika perlu
+    }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <Loader2 className="w-10 h-10 animate-spin text-red-600" />
-      </div>
+      <main className="flex items-center justify-center min-h-screen bg-white">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-600" />
+        <span className="ml-2">Memuat detail pesanan...</span>
+      </main>
     );
   }
 
-  if (!order) {
-    return <div className="text-center text-red-500 mt-20">Pesanan tidak ditemukan.</div>;
-  }
-
   return (
-    <div className="max-w-sm mx-auto p-4 print:p-0 font-mono text-xs text-black">
-      {/* === STRUK === */}
-      <div
-        id="receipt"
-        className="bg-white p-4 shadow rounded border print:border-none print:shadow-none print:p-1 print:rounded-none print:w-[72mm]"
-      >
-        <div className="text-center mb-2">
-          <h2 className="text-base font-bold uppercase tracking-wide text-red-700">
-            {order.restaurants?.name || "Nama Restoran"}
-          </h2>
-          <p className="text-[10px]">{order.restaurants?.location || "-"}</p>
-          <div className="my-1 border-t border-dashed border-gray-400" />
-        </div>
-
-        <div className="mb-2">
-          <p>ID: <span className="float-right">{order.id}</span></p>
-          <p>Kasir: <span className="float-right">{kasirName}</span></p>
-          <p>Tanggal: <span className="float-right">{new Date(order.created_at).toLocaleString()}</span></p>
-        </div>
-
-        <div className="my-1 border-t border-dashed border-gray-400" />
-
-        <div className="mb-2">
-          {orderItems.map((item, i) => (
-            <div key={i} className="flex justify-between">
-              <div className="w-1/2 truncate">{item.menu_items.name}</div>
-              <div className="text-center w-1/6">x{item.quantity}</div>
-              <div className="text-right w-1/3">Rp {(item.menu_items.price * item.quantity).toLocaleString()}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="my-1 border-t border-dashed border-gray-400" />
-
-        <div className="flex justify-between font-bold text-red-700 mt-2">
-          <span>Total</span>
-          <span>Rp {totalPrice.toLocaleString()}</span>
-        </div>
-
-        <div className="my-1 border-t border-dashed border-gray-400" />
-
-        <div className="text-center mt-2">
-          <p>Terima kasih!</p>
-          <p>~ Sampai Jumpa Kembali ~</p>
-        </div>
+    <main className="p-4 max-w-md mx-auto bg-white print:bg-white text-sm font-mono">
+      <div className="mb-2 text-xs text-gray-500 print:hidden">
+        ID Kasir: <span className="text-gray-800">{kasirId}</span>
       </div>
 
-      {/* === TOMBOL AKSI === */}
-      <div className="flex gap-2 mt-4 print:hidden justify-between">
+      {shiftData && (
+        <div className="mb-2 text-xs text-gray-600 print:hidden">
+          Shift: <span className="font-semibold">{formatShiftTime(shiftData.start_time, shiftData.end_time)}</span>
+        </div>
+      )}
+
+      <h1 className="text-center text-base font-bold mb-1">PT KARASE</h1>
+      <h2 className="text-center font-semibold mb-2">{restaurantName}</h2>
+
+      <p className="text-center text-xs mb-2">
+        Meja: <span className="font-semibold">{tableNumber}</span>
+      </p>
+
+      <hr className="border-dashed border-gray-400 mb-2" />
+
+      <table className="w-full text-xs mb-2">
+        <thead>
+          <tr>
+            <th className="text-left">Menu</th>
+            <th className="text-center">Qty</th>
+            <th className="text-right">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {orderItems.map((item) => (
+            <tr key={item.id}>
+              <td>{item.menu_items.name}</td>
+              <td className="text-center">{item.quantity}</td>
+              <td className="text-right">
+                Rp {(item.menu_items.price * item.quantity).toLocaleString('id-ID')}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <hr className="border-dashed border-gray-400 my-2" />
+      <p className="text-right font-bold">
+        TOTAL: Rp {total.toLocaleString('id-ID')}
+      </p>
+
+      <div className="mt-4 text-xs text-left print:block hidden">
+        Kasir: <span className="font-semibold">{kasirName}</span>
+      </div>
+
+      <p className="mt-4 text-center text-xs text-gray-600 print:hidden">
+        Tekan tombol cetak struk untuk mencetak dan menyimpan data penjualan
+      </p>
+
+      <div className="mt-4 text-center print:hidden">
         <button
-          onClick={() => router.push("/kasir/dashboard")}
-          className="bg-gray-200 px-4 py-2 rounded hover:bg-gray-300"
+          onClick={handlePrintClick}
+          disabled={printing || loading}
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          ← Kembali
-        </button>
-        <button
-          onClick={handleConfirm}
-          disabled={saving || completed}
-          className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 disabled:opacity-60"
-        >
-          {saving ? (
-            <span className="flex items-center gap-2">
-              <Loader2 className="animate-spin w-4 h-4" />
-              Menyimpan...
-            </span>
+          {printing ? (
+            <>
+              <Loader2 className="inline w-4 h-4 animate-spin mr-2" />
+              Mencetak...
+            </>
           ) : (
-            "Simpan & Cetak"
+            'Cetak Struk'
           )}
         </button>
       </div>
 
-      {/* === NOTIFIKASI STATUS === */}
-      {completed && (
-        <div className="mt-3 text-green-700 text-center print:hidden">
-          ✅ Pesanan berhasil disimpan dan dicetak.
+      <div className="mt-4 text-center text-xs text-gray-800">
+        Terima kasih telah memesan
+        <br />
+        Simpan struk ini sebagai bukti pembayaran
+      </div>
+
+      {order.is_confirmed && !order.is_paid && (
+        <div className="mt-4 text-center">
+          <button
+            onClick={() => handleConfirmPayment(order.id)}
+            className="bg-green-600 text-white px-4 py-2 rounded"
+          >
+            Konfirmasi Pembayaran
+          </button>
         </div>
       )}
-    </div>
+    </main>
   );
 }
