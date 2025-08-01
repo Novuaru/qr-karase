@@ -12,8 +12,14 @@ interface KasirReport {
   total_minutes: number
 }
 
+interface ItemReport {
+  name: string
+  total_sold: number
+}
+
 export default function LaporanKasirPage() {
-  const [data, setData] = useState<KasirReport[]>([])
+  const [kasirData, setKasirData] = useState<KasirReport[]>([])
+  const [itemData, setItemData] = useState<ItemReport[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -27,34 +33,31 @@ export default function LaporanKasirPage() {
         .select('id, name')
         .eq('role', 'kasir')
 
-      if (userError || !users) {
-        setError('Gagal mengambil data kasir')
-        setLoading(false)
-        return
-      }
-
       const { data: shifts, error: shiftError } = await supabase
         .from('shifts')
         .select('id, kasir_id, start_time, end_time')
         .not('end_time', 'is', null)
 
-      if (shiftError || !shifts) {
-        setError('Gagal mengambil data shift')
-        setLoading(false)
-        return
-      }
-
       const { data: salesLogs, error: salesError } = await supabase
         .from('sales_logs')
         .select('kasir_id, total_price')
 
-      if (salesError || !salesLogs) {
-        setError('Gagal mengambil data penjualan')
+      const { data: orderItems, error: orderItemsError } = await supabase
+        .from('order_items')
+        .select('menu_item_id, quantity')
+
+      const { data: menuItems, error: menuItemsError } = await supabase
+        .from('menu_items')
+        .select('id, name')
+
+      if (userError || shiftError || salesError || orderItemsError || menuItemsError || !users || !shifts || !salesLogs || !orderItems || !menuItems) {
+        setError('Gagal mengambil data dari server')
         setLoading(false)
         return
       }
 
-      const laporan: KasirReport[] = users.map((kasir) => {
+      // ===== Laporan Kasir =====
+      const laporanKasir: KasirReport[] = users.map((kasir) => {
         const kasirShifts = shifts.filter((s) => s.kasir_id === kasir.id)
         const totalMinutes = kasirShifts.reduce((total, s) => {
           const start = new Date(s.start_time)
@@ -73,7 +76,23 @@ export default function LaporanKasirPage() {
         }
       })
 
-      setData(laporan)
+      // ===== Laporan Barang Terjual =====
+      const menuMap = new Map(menuItems.map(item => [item.id, item.name]))
+      const itemCountMap = new Map<string, number>()
+
+      for (const item of orderItems) {
+        const name = menuMap.get(item.menu_item_id) || 'Unknown'
+        const current = itemCountMap.get(name) || 0
+        itemCountMap.set(name, current + item.quantity)
+      }
+
+      const laporanBarang: ItemReport[] = Array.from(itemCountMap.entries()).map(([name, total_sold]) => ({
+        name,
+        total_sold,
+      })).sort((a, b) => b.total_sold - a.total_sold)
+
+      setKasirData(laporanKasir)
+      setItemData(laporanBarang)
       setLoading(false)
     }
 
@@ -81,8 +100,8 @@ export default function LaporanKasirPage() {
   }, [])
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-10">
-      <h1 className="text-3xl font-bold text-gray-800">📊 Laporan Performa Kasir</h1>
+    <div className="p-6 max-w-7xl mx-auto space-y-10">
+      <h1 className="text-3xl font-bold text-gray-800">📊 Laporan</h1>
 
       {/* Navigasi laporan */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -97,18 +116,18 @@ export default function LaporanKasirPage() {
         ))}
       </div>
 
-      {/* Tabel laporan */}
-      <section className="overflow-x-auto">
-        {loading ? (
-          <div className="flex justify-center items-center h-40">
-            <Loader2 className="w-8 h-8 animate-spin text-red-500" />
-          </div>
-        ) : error ? (
-          <p className="text-red-600 font-medium">{error}</p>
-        ) : data.length === 0 ? (
-          <p className="text-gray-500 italic">Belum ada data shift atau penjualan kasir.</p>
-        ) : (
-          <div className="border rounded-md shadow-sm">
+      {/* Dua Tabel: Kasir & Barang Terjual */}
+      {loading ? (
+        <div className="flex justify-center items-center h-40">
+          <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+        </div>
+      ) : error ? (
+        <p className="text-red-600 font-medium">{error}</p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Tabel Laporan Kasir */}
+          <section className="overflow-x-auto border rounded-md shadow-sm">
+            <h2 className="text-lg font-semibold px-4 py-2 bg-gray-100 border-b">🧾 Laporan Kasir</h2>
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-100">
                 <tr>
@@ -118,7 +137,7 @@ export default function LaporanKasirPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-100">
-                {data.map((kasir, idx) => (
+                {kasirData.map((kasir, idx) => (
                   <tr
                     key={kasir.id}
                     className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
@@ -134,9 +153,30 @@ export default function LaporanKasirPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
-      </section>
+          </section>
+
+          {/* Tabel Barang Terjual */}
+          <section className="overflow-x-auto border rounded-md shadow-sm">
+            <h2 className="text-lg font-semibold px-4 py-2 bg-gray-100 border-b">🍽️ Barang Terjual</h2>
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-100">
+                <tr>
+                  <th className="text-left px-6 py-3 font-semibold text-gray-700">📦 Nama Menu</th>
+                  <th className="text-right px-6 py-3 font-semibold text-gray-700">🔢 Jumlah Terjual</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-100">
+                {itemData.map((item, idx) => (
+                  <tr key={item.name} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="px-6 py-3 text-gray-800">{item.name}</td>
+                    <td className="px-6 py-3 text-gray-600 text-right">{item.total_sold}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
