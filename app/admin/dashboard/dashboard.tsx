@@ -19,9 +19,8 @@ import {
   Utensils,
   Store,
   Loader2,
-  Star,
-  Ghost,
-} from "lucide-react";
+  CheckCircle,
+} from "lucide-react"; // ✅ ikon untuk Konfirmasi Pesanan
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,21 +34,11 @@ export default function AdminDashboard() {
     totalMenuItems: 0,
     totalRestaurants: 0,
   });
-
   const [chartData, setChartData] = useState<
     { date: string; sales: number; orders: number }[]
   >([]);
-  const [loading, setLoading] = useState(true);
   const [filterPeriod, setFilterPeriod] = useState("daily");
-
-  const [bestSeller, setBestSeller] = useState<null | {
-    name: string;
-    total: number;
-  }>(null);
-  const [leastSeller, setLeastSeller] = useState<null | {
-    name: string;
-    total: number;
-  }>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchStats();
@@ -65,20 +54,10 @@ export default function AdminDashboard() {
       const { data: ordersData } = await supabase
         .from("orders")
         .select("id, created_at");
-      const { data: menuData } = await supabase
-        .from("menu_items")
-        .select("id");
+      const { data: menuData } = await supabase.from("menu_items").select("id");
       const { data: restaurantData } = await supabase
         .from("restaurants")
         .select("id");
-
-      const { data: popularMenus } = await supabase
-        .from("order_items")
-        .select("menu_item_id, quantity");
-
-      const { data: allMenus } = await supabase
-        .from("menu_items")
-        .select("id, name");
 
       const totalSales =
         salesData?.reduce((acc, curr) => acc + (curr.total_price ?? 0), 0) ?? 0;
@@ -114,26 +93,6 @@ export default function AdminDashboard() {
       });
 
       setChartData(data);
-
-      if (popularMenus && allMenus) {
-        const totalPerMenu: Record<string, number> = {};
-
-        for (const item of popularMenus) {
-          const id = item.menu_item_id;
-          totalPerMenu[id] = (totalPerMenu[id] || 0) + (item.quantity ?? 0);
-        }
-
-        const withName = allMenus.map((menu) => ({
-          name: menu.name,
-          id: menu.id,
-          total: totalPerMenu[menu.id] || 0,
-        }));
-
-        const sorted = withName.sort((a, b) => b.total - a.total);
-
-        setBestSeller(sorted[0] ?? null);
-        setLeastSeller(sorted[sorted.length - 1] ?? null);
-      }
     } catch (error) {
       console.error("Error fetching stats:", error);
     } finally {
@@ -160,6 +119,7 @@ export default function AdminDashboard() {
           Dashboard Admin
         </h1>
 
+        {/* Filter */}
         <div className="flex items-center gap-3">
           <label htmlFor="filterPeriod" className="font-medium text-gray-700">
             Filter Periode:
@@ -177,6 +137,7 @@ export default function AdminDashboard() {
           </select>
         </div>
 
+        {/* Grafik */}
         <div className="bg-white rounded-2xl shadow-md p-6 ring-1 ring-gray-200">
           <h2 className="text-xl font-semibold text-gray-800 mb-4">
             Grafik Penjualan & Pesanan
@@ -206,6 +167,7 @@ export default function AdminDashboard() {
           </ResponsiveContainer>
         </div>
 
+        {/* Statistik */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             icon={<BarChart3 className="w-6 h-6 text-emerald-500" />}
@@ -229,19 +191,7 @@ export default function AdminDashboard() {
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <StatCard
-            icon={<Star className="w-6 h-6 text-green-600" />}
-            label="Menu Paling Laris"
-            value={bestSeller ? `${bestSeller.name} (${bestSeller.total}x)` : "Tidak ada data"}
-          />
-          <StatCard
-            icon={<Ghost className="w-6 h-6 text-gray-500" />}
-            label="Menu Sepi Peminat"
-            value={leastSeller ? `${leastSeller.name} (${leastSeller.total}x)` : "Tidak ada data"}
-          />
-        </div>
-
+        {/* Aksi Cepat */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <QuickActionCard
             title="Kelola Menu"
@@ -263,6 +213,12 @@ export default function AdminDashboard() {
             href="/admin/laporan"
             description="Lihat laporan penjualan dan kinerja"
           />
+          <QuickActionCard
+            title="Konfirmasi Pesanan"
+            href="/admin/payment"
+            description="Verifikasi dan validasi pesanan masuk"
+            icon={<CheckCircle className="w-5 h-5 text-purple-500" />}
+          />
         </div>
       </div>
     </div>
@@ -283,7 +239,7 @@ function StatCard({
       <div className="p-3 bg-gray-50 rounded-full">{icon}</div>
       <div>
         <h3 className="text-sm font-medium text-gray-600">{label}</h3>
-        <p className="text-lg sm:text-2xl font-bold text-gray-900">{value}</p>
+        <p className="text-2xl font-bold text-gray-900">{value}</p>
       </div>
     </div>
   );
@@ -293,18 +249,23 @@ function QuickActionCard({
   title,
   href,
   description,
+  icon,
 }: {
   title: string;
   href: string;
   description: string;
+  icon?: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
-      className="bg-white rounded-2xl shadow-sm p-5 ring-1 ring-gray-100 hover:ring-emerald-300 hover:shadow-md transition-all duration-200 block"
+      className="bg-white rounded-2xl shadow-sm p-4 sm:p-5 ring-1 ring-gray-100 hover:shadow-lg hover:ring-emerald-400 transition-all block duration-200"
     >
-      <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
-      <p className="text-sm text-gray-600 mt-1">{description}</p>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-lg text-gray-800">{title}</h3>
+        {icon && <div>{icon}</div>}
+      </div>
+      <p className="text-gray-600 text-sm sm:text-base">{description}</p>
     </Link>
   );
 }
