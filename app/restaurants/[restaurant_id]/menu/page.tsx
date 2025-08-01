@@ -1,11 +1,15 @@
+// app/restaurants/[restaurant_id]/menu.tsx
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/utils/supabase/client';
 import { Listbox, Transition } from '@headlessui/react';
-import toast, { Toaster } from 'react-hot-toast';
-import { CheckIcon, ChevronUpDownIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import {
+  CheckIcon,
+  ChevronUpDownIcon,
+  ArrowPathIcon,
+} from '@heroicons/react/24/outline';
 
 const supabase = createClient();
 
@@ -17,6 +21,10 @@ type MenuItem = {
   is_available: boolean;
   restaurant_id: string;
   image_url: string | null;
+  is_promo: boolean;
+  promo_price: number | null;
+  promo_description: string | null;
+  is_best_seller: boolean; // Tambahan
 };
 
 type CartItem = MenuItem & { quantity: number };
@@ -31,6 +39,8 @@ export default function RestaurantMenuPage() {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState('Semua');
   const [tableNumber, setTableNumber] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   useEffect(() => {
     const fetchMenu = async () => {
@@ -77,6 +87,10 @@ export default function RestaurantMenuPage() {
     else localStorage.removeItem('table_number');
   }, [tableNumber]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCategory]);
+
   const addToCart = useCallback((item: MenuItem) => {
     setCart((prev) => {
       const current = prev[item.id] || { ...item, quantity: 0 };
@@ -112,7 +126,7 @@ export default function RestaurantMenuPage() {
 
   const goToCart = () => {
     if (!tableNumber) {
-      toast.error('Silakan pilih nomor meja terlebih dahulu.');
+      alert('Silakan pilih nomor meja terlebih dahulu.');
       return;
     }
     router.push(`/cart?restaurant_id=${restaurant_id}&table_number=${tableNumber}`);
@@ -128,10 +142,22 @@ export default function RestaurantMenuPage() {
     return menuItems.filter((item) => item.category === selectedCategory);
   }, [menuItems, selectedCategory]);
 
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredItems.slice(start, start + itemsPerPage);
+  }, [filteredItems, currentPage]);
+
+  const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
+
   const MenuCard = ({ item }: { item: MenuItem }) => {
     const quantity = getQuantity(item.id);
     return (
-      <div className="border rounded-xl shadow hover:shadow-lg transition bg-white flex flex-col overflow-hidden">
+      <div className="border rounded-xl shadow hover:shadow-lg transition bg-white flex flex-col overflow-hidden relative">
+        {item.is_best_seller && (
+          <span className="absolute top-2 left-2 bg-yellow-400 text-white text-xs px-2 py-0.5 rounded-full font-semibold shadow">
+            ⭐ Best Seller
+          </span>
+        )}
         <div className="h-48 bg-gray-50 flex items-center justify-center">
           {item.image_url ? (
             <img
@@ -147,9 +173,28 @@ export default function RestaurantMenuPage() {
         <div className="p-4 flex flex-col flex-1">
           <h2 className="font-bold text-lg mb-1">{item.name}</h2>
           <p className="text-sm text-gray-500">{item.category}</p>
-          <p className="text-red-600 font-semibold mt-2 mb-4">
-            Rp{item.price.toLocaleString('id-ID')}
+
+          <p className="text-red-600 font-semibold mt-2 mb-1">
+            {item.is_promo && item.promo_price != null ? (
+              <>
+                <span className="line-through text-sm text-gray-400 mr-2">
+                  Rp{item.price.toLocaleString('id-ID')}
+                </span>
+                <span className="text-red-600 font-bold">
+                  Rp{item.promo_price.toLocaleString('id-ID')}
+                </span>
+              </>
+            ) : (
+              <>Rp{item.price.toLocaleString('id-ID')}</>
+            )}
           </p>
+
+          {item.is_promo && item.promo_description && (
+            <p className="text-sm text-red-500 italic mb-2">
+              Promo: {item.promo_description}
+            </p>
+          )}
+
           <div className="mt-auto flex justify-between items-center">
             <button
               onClick={() => removeFromCart(item.id)}
@@ -173,10 +218,9 @@ export default function RestaurantMenuPage() {
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8">
-      <Toaster position="top-center" reverseOrder={false} />
+      {/* Pilih Meja */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-red-700">🍽️ Daftar Menu</h1>
-
         <Listbox value={tableNumber} onChange={setTableNumber}>
           <div className="relative">
             <Listbox.Button className="relative w-40 cursor-default rounded border bg-white py-1.5 pl-3 pr-10 text-left shadow-sm text-sm focus:outline-none focus:ring-1 focus:ring-red-500">
@@ -187,11 +231,7 @@ export default function RestaurantMenuPage() {
                 <ChevronUpDownIcon className="h-4 w-4 text-gray-400" />
               </span>
             </Listbox.Button>
-            <Transition
-              leave="transition ease-in duration-100"
-              leaveFrom="opacity-100"
-              leaveTo="opacity-0"
-            >
+            <Transition leave="transition ease-in duration-100" leaveFrom="opacity-100" leaveTo="opacity-0">
               <Listbox.Options className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md bg-white py-1 text-sm shadow-lg ring-1 ring-black ring-opacity-5">
                 {[...Array(15)].map((_, i) => {
                   const value = String(i + 1);
@@ -210,11 +250,11 @@ export default function RestaurantMenuPage() {
                           <span className={`block truncate ${selected ? 'font-medium' : ''}`}>
                             Meja {value}
                           </span>
-                          {selected ? (
+                          {selected && (
                             <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-red-600">
                               <CheckIcon className="h-4 w-4" />
                             </span>
-                          ) : null}
+                          )}
                         </>
                       )}
                     </Listbox.Option>
@@ -226,6 +266,7 @@ export default function RestaurantMenuPage() {
         </Listbox>
       </div>
 
+      {/* Kategori */}
       <div className="overflow-x-auto whitespace-nowrap no-scrollbar mb-6">
         <div className="inline-flex gap-2 px-2">
           {categories.map((cat) => (
@@ -244,6 +285,7 @@ export default function RestaurantMenuPage() {
         </div>
       </div>
 
+      {/* Menu */}
       {loading ? (
         <div className="flex justify-center items-center py-12 gap-2 text-gray-600">
           <ArrowPathIcon className="h-6 w-6 animate-spin text-red-600" />
@@ -254,10 +296,49 @@ export default function RestaurantMenuPage() {
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 mb-10">
-            {filteredItems.map((item) => (
+            {paginatedItems.map((item) => (
               <MenuCard key={item.id} item={item} />
             ))}
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex justify-center items-center gap-2 mb-8">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded-full border text-sm text-gray-700 bg-white hover:bg-gray-100 disabled:opacity-50"
+              >
+                ←
+              </button>
+              {[...Array(totalPages)].map((_, i) => {
+                const page = i + 1;
+                const isActive = page === currentPage;
+                return (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                      isActive
+                        ? 'bg-red-600 text-white shadow'
+                        : 'bg-white text-gray-700 border hover:bg-red-50'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded-full border text-sm text-gray-700 bg-white hover:bg-gray-100 disabled:opacity-50"
+              >
+                →
+              </button>
+            </div>
+          )}
+
+          {/* Tombol Lihat Keranjang */}
           <div className="text-center">
             <button
               onClick={goToCart}
